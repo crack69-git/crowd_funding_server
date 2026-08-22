@@ -21,8 +21,6 @@ const port = process.env.PORT || 5000;
 const client = new MongoClient(process.env.MONGO_URI);
 const store_id = process.env.STORE_ID;
 const store_passwd = process.env.STORE_PASSWORD;
-console.log("Store ID:", store_id);
-console.log("Store Password:", store_passwd);
 
 // Convert environment string to strict boolean
 const is_live = process.env.IS_LIVE === "true";
@@ -39,16 +37,97 @@ async function startServer() {
     const tiersCollection = db.collection("tiers");
     const ordersCollection = db.collection("orders"); // Added Orders collection
 
+    // paymentHistory
+    app.get("/api/paymentHistory/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await ordersCollection
+          .aggregate([
+            {
+              $match: {
+                cus_email: email,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalAmountSpent: { $sum: "$total_amount" },
+                totalCreditPurchased: { $sum: "$amount_converted" },
+              },
+            },
+          ])
+
+          .toArray();
+        console.log("Payment history result:", result);
+        res.json({
+          totalAmountSpent: result[0]?.totalAmountSpent || 0,
+          totalCreditPurchased: result[0]?.totalCreditPurchased || 0,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({
+          error: "Failed to fetch payment statistics.",
+        });
+      }
+    });
+
+    // getSingleCampaign
+    app.get("/api/getSingleCampaign/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const campaign = await campaignsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!campaign) {
+          return res.status(404).json({ error: "Campaign not found" });
+        }
+        res.json(campaign);
+      } catch (err) {
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+
+    // getUserByMail
+    app.get("/api/getUserByMail/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).json({ error: "User not found" });
+        }
+        res.json(user);
+      } catch (err) {
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+
+    // patchUserInfo
+    app.patch("/api/patchUserInfo/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const { credit } = req.body;
+        console.log("req body:", req.body);
+
+        const result = await usersCollection.updateOne(
+          { email },
+          { $set: { credit } },
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+
     app.get("/api/getOrders/:email", async (req, res) => {
       try {
         const email = req.params.email;
         const orders = await ordersCollection
-          .find({ cus_email: email, status: "PAID" })
+          .find({ cus_email: email })
           .sort({ createdAt: -1 })
           .toArray();
         res.json(orders);
       } catch (error) {
-        console.error(error);
         res.status(500).json({ error: "Failed to fetch orders." });
       }
     });
@@ -57,7 +136,14 @@ async function startServer() {
     // 1. SSLCOMMERZ: INITIATE PAYMENT
     // =========================================================
     app.post("/api/payment/init", async (req, res) => {
-      const { total_amount, cus_name, cus_email, product_name } = req.body;
+      console.log("Received payment initiation request:", req.body);
+      const {
+        total_amount,
+        amount_converted,
+        cus_name,
+        cus_email,
+        product_name,
+      } = req.body;
 
       const tran_id = `REF_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
@@ -66,6 +152,7 @@ async function startServer() {
         const initialOrder = {
           tran_id,
           total_amount: Number(total_amount),
+          amount_converted: Number(amount_converted),
           product_name,
           cus_name,
           cus_email,
@@ -79,6 +166,7 @@ async function startServer() {
         // B. Prepare data for SSLCommerz
         const data = {
           total_amount: Number(total_amount),
+          amount_converted: Number(amount_converted),
           currency: "BDT",
           tran_id: tran_id,
           success_url: `http://localhost:${port}/api/payment/success?tran_id=${tran_id}`,
@@ -108,25 +196,14 @@ async function startServer() {
           ship_country: "Bangladesh",
         };
 
-        // C. Request Gateway URL from SSLCommerz
-        console.log("========== SSL CONFIG ==========");
-        console.log("STORE_ID:", store_id);
-        console.log("PASSWORD EXISTS:", !!store_passwd);
-        console.log("PASSWORD LENGTH:", store_passwd?.length);
-        console.log("IS LIVE:", is_live);
-        console.log("================================");
         const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
         const apiResponse = await sslcz.init(data);
-
-        console.log("SSLCommerz response:", apiResponse);
 
         if (apiResponse?.GatewayPageURL) {
           return res.json({
             url: apiResponse.GatewayPageURL,
           });
         }
-
-        console.error("SSLCommerz initialization failed:", apiResponse);
 
         await ordersCollection.deleteOne({ tran_id });
 
@@ -135,7 +212,6 @@ async function startServer() {
           details: apiResponse,
         });
       } catch (error) {
-        console.error(error);
         await ordersCollection.deleteOne({ tran_id });
         return res.status(500).json({
           error: "Internal Server Error",
@@ -186,7 +262,6 @@ async function startServer() {
           );
         }
       } catch (error) {
-        console.error(error);
         await ordersCollection.updateOne(
           { tran_id },
           { $set: { status: "FAILED" } },
@@ -237,7 +312,6 @@ async function startServer() {
         }
         res.json(order);
       } catch (err) {
-        console.error(err);
         res.status(500).json({ error: "Internal Server Error" });
       }
     });
@@ -249,7 +323,7 @@ async function startServer() {
       try {
         const id = req.params.id;
         const { state } = req.body;
-        console.log(`Updating campaign with ID: ${id} to state: ${state}`);
+
         const result = await campaignsCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: { state } },
