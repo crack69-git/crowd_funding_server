@@ -36,6 +36,34 @@ async function startServer() {
     const campaignsCollection = db.collection("campaigns");
     const tiersCollection = db.collection("tiers");
     const ordersCollection = db.collection("orders"); // Added Orders collection
+    const fundsCollection = db.collection("funds");
+
+    // fundPost
+    app.post("/api/fundPost", async (req, res) => {
+      try {
+        const fund = req.body;
+        const result = await fundsCollection.insertOne(fund);
+        res.status(201).json(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+
+    // getLimitCampaigns
+    app.get("/api/getLimitCampaigns", async (req, res) => {
+      try {
+        const campaigns = await campaignsCollection
+          .find({ state: "approved", status: "active" })
+          .sort({ dateCreated: -1 })
+          .limit(6)
+          .toArray();
+        res.json(campaigns);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
 
     // paymentHistory
     app.get("/api/paymentHistory/:email", async (req, res) => {
