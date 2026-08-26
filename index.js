@@ -38,6 +38,32 @@ async function startServer() {
     const ordersCollection = db.collection("orders"); // Added Orders collection
     const fundsCollection = db.collection("funds");
 
+    // patchCampaignRaisedAmountNState
+    app.patch("/api/patchCampaignRaisedAmountNState/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const { credit } = req.body;
+        console.log("Received request to update campaign with ID:", id, credit);
+        console.log(
+          "Updating campaign with ID:",
+          id,
+          "remaining credit:",
+          credit,
+        );
+
+        const result = await campaignsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { TotalRaised: credit } },
+        );
+        console.log("Update result:", result);
+        res.json(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+
     // fundPost
     app.post("/api/fundPost", async (req, res) => {
       try {
@@ -135,11 +161,12 @@ async function startServer() {
       try {
         const email = req.params.email;
         const { credit } = req.body;
+        console.log("Updating user info for email:", email, credit);
         console.log("req body:", req.body);
 
         const result = await usersCollection.updateOne(
           { email },
-          { $set: { credit } },
+          { $set: { credit: credit } },
         );
         res.json(result);
       } catch (err) {
