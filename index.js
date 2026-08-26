@@ -38,6 +38,20 @@ async function startServer() {
     const ordersCollection = db.collection("orders"); // Added Orders collection
     const fundsCollection = db.collection("funds");
 
+    // deleteSingleCampaign
+    app.delete("/api/deleteSingleCampaign/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await campaignsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.json(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+
     // patchCampaignRaisedAmountNState
     app.patch("/api/patchCampaignRaisedAmountNState/:id", async (req, res) => {
       try {
